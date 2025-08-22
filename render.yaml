@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: cnx-langgraph-agent
+    runtime: python
+    plan: free
+    region: oregon
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn langgraph_agent_workflow:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: PINECONE_INDEX
+        sync: false
+      - key: PRODUCT_SEARCH_MCP_URL
+        value: "https://n5ycpj-wu.myshopify.com/api/mcp"
+      - key: ORDER_MCP_URL
+        value: "https://cnx-demo-mcp-server.onrender.com/api/mcp"
