@@ -800,12 +800,27 @@ def process_user_message(user_message: str) -> dict:
     # Execute the workflow
     result = graph.invoke({"user_message": user_message})
     
+    # Augment final_response JSON with user_intent when possible
+    intent = result.get("intent")
+    final_response = result.get("final_response") or ""
+    augmented_final = final_response
+    try:
+        parsed = json.loads(final_response) if isinstance(final_response, str) else final_response
+        if isinstance(parsed, dict):
+            # Do not overwrite if already present
+            parsed.setdefault("user_intent", intent)
+            augmented_final = json.dumps(parsed)
+    except Exception:
+        # Leave as-is if not valid JSON
+        pass
+    
     return {
         "user_message": result.get("user_message"),
-        "intent": result.get("intent"),
+        "intent": intent,
         "intent_details": result.get("intent_details"),
-        "final_response": result.get("final_response"),
-        "full_state": result
+        "final_response": augmented_final,
+        "full_state": result,
+        "user_intent": intent,
     }
 
 # === FASTAPI INTEGRATION ===
@@ -824,6 +839,7 @@ class AgentResponse(BaseModel):
     intent: Optional[str] = None
     intent_details: Optional[Dict[str, Any]] = None
     inner_messages: Optional[List[Dict[str, Any]]] = None
+    user_intent: Optional[str] = None
 
 @app.post("/agent-assistant/", response_model=AgentResponse)
 async def agent_assistant(request: MessageRequest):
@@ -852,7 +868,8 @@ async def agent_assistant(request: MessageRequest):
             chat_message=chat_message,
             intent=result.get("intent"),
             intent_details=result.get("intent_details"),
-            inner_messages=[result.get("full_state", {})]
+            inner_messages=[result.get("full_state", {})],
+            user_intent=result.get("user_intent") or result.get("intent")
         )
         
     except Exception as e:

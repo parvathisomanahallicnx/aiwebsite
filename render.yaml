@@ -9,6 +9,8 @@ services:
     startCommand: uvicorn langgraph_agent_workflow:app --host 0.0.0.0 --port $PORT --proxy-headers
     healthCheckPath: /health
     envVars:
+      - key: PIP_PREFER_BINARY
+        value: "1"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: GOOGLE_API_KEY
