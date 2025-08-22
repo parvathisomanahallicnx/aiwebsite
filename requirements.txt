@@ -3,11 +3,11 @@ uvicorn==0.24.0
 pydantic>=2.7.4,<3.0.0
 requests==2.31.0
 google-generativeai>=0.7.0
-langchain==0.2.16
-langchain-google-genai==1.0.10
-langchain-pinecone==0.1.3
-langchain-community==0.2.16
-langgraph>=0.2.0,<0.3.0
+langchain
+langchain-google-genai
+langchain-pinecone
+langchain-community
+langgraph
 langchain-huggingface==0.0.3
 pinecone-client>=5.0.0,<6.0.0
 streamlit==1.29.0
