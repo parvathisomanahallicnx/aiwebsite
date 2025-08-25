@@ -1,0 +1,13 @@
+# Ignore files not needed for Vercel deployment
+backuprender/
+__pycache__/
+*.pyc
+.qodo/
+.env
+docs/
+screens/
+aiwebsite/
+constraints.txt
+technicaldocument.md
+Train_Your_Own_Data.py
+agent_ui.py
