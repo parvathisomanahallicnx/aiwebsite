@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Agent API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .status {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #4caf50;
+            margin: 20px 0;
+        }
+        .endpoints {
+            margin: 20px 0;
+        }
+        .endpoint {
+            background: #f8f9fa;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 3px solid #007bff;
+        }
+        code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 LangGraph Agent API</h1>
+        
+        <div class="status">
+            <strong>✅ Status:</strong> API is running on Netlify
+        </div>
+        
+        <h2>Available Endpoints</h2>
+        <div class="endpoints">
+            <div class="endpoint">
+                <strong>GET /</strong> - Root endpoint
+                <br><code>Returns: {"message": "LangGraph Agent API is running on Netlify"}</code>
+            </div>
+            
+            <div class="endpoint">
+                <strong>GET /health</strong> - Health check
+                <br><code>Returns: {"status": "healthy", "service": "LangGraph Agent API"}</code>
+            </div>
+            
+            <div class="endpoint">
+                <strong>POST /agent-assistant/</strong> - Main workflow endpoint
+                <br><code>Body: {"message": "your query here"}</code>
+                <br><code>Returns: Complete LangGraph workflow response</code>
+            </div>
+        </div>
+        
+        <h2>Features</h2>
+        <ul>
+            <li>🔍 <strong>Product Search</strong> - Find products via MCP server integration</li>
+            <li>🛒 <strong>Order Creation</strong> - Create orders through workflow</li>
+            <li>📦 <strong>Order Status</strong> - Track order status</li>
+            <li>💬 <strong>Info Search</strong> - General queries via Gemini LLM</li>
+            <li>🧠 <strong>LangGraph Workflow</strong> - Intelligent routing and processing</li>
+        </ul>
+        
+        <h2>Environment Variables Required</h2>
+        <ul>
+            <li><code>GEMINI_API_KEY</code> or <code>GOOGLE_API_KEY</code> - For Gemini LLM</li>
+            <li><code>PINECONE_API_KEY</code> - For vector storage (optional)</li>
+            <li><code>PINECONE_INDEX</code> - Pinecone index name (optional)</li>
+        </ul>
+    </div>
+</body>
+</html>
