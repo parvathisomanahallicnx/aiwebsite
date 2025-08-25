@@ -13,3 +13,9 @@ SQLAlchemy==2.0.32
 aiohttp==3.12.14
 yarl==1.9.4
 multidict==6.6.3
+
+# Google API deps causing resolver backtracking
+grpcio-status==1.71.0
+proto-plus==1.25.0
+google-api-core==2.24.0
+grpcio==1.71.0
