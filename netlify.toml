@@ -22,8 +22,10 @@
   status = 200
 
 [functions]
-  runtime = "python3.9"
   external_node_modules = ["sharp"]
   
 [functions."index"]
+  runtime = "python3.9"
+
+[functions."hello"]
   runtime = "python3.9"
