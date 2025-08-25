@@ -23,3 +23,6 @@
 
 [functions]
   external_node_modules = ["sharp"]
+  
+[functions."index"]
+  runtime = "python3.9"
