@@ -1,4 +1,4 @@
-# syntax=Docker/dockerfile:1
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -24,5 +24,5 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# Start the FastAPI app
-CMD ["uvicorn", "langgraph_agent_workflow:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+# Start the FastAPI app (honor platform-provided $PORT when present)
+CMD ["sh", "-c", "uvicorn langgraph_agent_workflow:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers"]
