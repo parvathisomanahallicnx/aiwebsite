@@ -1,0 +1,10 @@
+# Keep build context small and secrets out of the image
+.git
+.gitignore
+__pycache__/
+*.pyc
+.qodo/
+.aiwebsite/
+.env
+screens/
+docs/*.docx
