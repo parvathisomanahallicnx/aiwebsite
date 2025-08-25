@@ -7,12 +7,17 @@
   PYTHON_VERSION = "3.9"
 
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
+  from = "/health"
+  to = "/.netlify/functions/index"
   status = 200
 
 [[redirects]]
-  from = "/*"
+  from = "/agent-assistant/*"
+  to = "/.netlify/functions/index"
+  status = 200
+
+[[redirects]]
+  from = "/api/*"
   to = "/.netlify/functions/index"
   status = 200
 
