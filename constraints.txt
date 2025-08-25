@@ -8,9 +8,8 @@ langgraph>=0.2.0,<0.3.0
 numpy==1.26.4
  
 # Reduce resolver backtracking and prefer wheels for Python 3.11/3.13
-# SQLAlchemy is sometimes pulled indirectly; constrain to a modern, widely compatible range
-SQLAlchemy>=1.4.49,<3.0.0
-# aiohttp dependency stack versions with manylinux wheels
-aiohttp>=3.9.5,<4.0.0
-yarl>=1.9.4,<2.0.0
-multidict>=6.0.4,<7.0.0
+# Resolver-heavy deps: hard-pin to cut backtracking and prefer wheels on Py3.11
+SQLAlchemy==2.0.32
+aiohttp==3.12.14
+yarl==1.9.4
+multidict==6.6.3
