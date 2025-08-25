@@ -925,3 +925,79 @@ def handler(event, context):
             },
             'body': json.dumps({"error": f"Internal server error: {str(e)}"})
         }
+
+# === NETLIFY FUNCTION HANDLER ===
+def handler(event, context):
+    """Main Netlify function handler"""
+    try:
+        # Extract HTTP method and path
+        http_method = event.get('httpMethod', 'GET')
+        path = event.get('path', '/')
+        
+        # Health check endpoint
+        if path == '/health' or path.endswith('/health'):
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    "status": "healthy",
+                    "service": "CNX Store AI Agent",
+                    "timestamp": "2025-08-25T17:31:03+05:30"
+                })
+            }
+        
+        # Main agent endpoint
+        if http_method == 'POST' and (path == '/agent-assistant/' or path.endswith('/agent-assistant/')):
+            body = json.loads(event.get('body', '{}'))
+            user_message = body.get('message', '')
+            
+            if not user_message:
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({"error": "Message is required"})
+                }
+            
+            # Run the LangGraph workflow
+            result = run_agent_workflow(user_message)
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    "chat_message": result.get("final_response", ""),
+                    "intent": result.get("intent"),
+                    "intent_details": result.get("intent_details"),
+                    "inner_messages": [result.get("full_state", {})],
+                    "user_intent": result.get("user_intent") or result.get("intent")
+                })
+            }
+        
+        else:
+            return {
+                'statusCode': 404,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({"error": "Not found"})
+            }
+    
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({"error": f"Internal server error: {str(e)}"})
+        }
