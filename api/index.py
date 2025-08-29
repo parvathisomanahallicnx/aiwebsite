@@ -601,6 +601,9 @@ class AgentResponse(BaseModel):
     inner_messages: Optional[List[Dict[str, Any]]] = None
     user_intent: Optional[str] = None
 
+class SingleMessageRequest(BaseModel):
+    message: str
+
 @app.post("/agent-assistant/", response_model=AgentResponse)
 async def agent_assistant(request: MessageRequest):
     """Process user messages through the complete LangGraph workflow"""
@@ -632,6 +635,26 @@ async def agent_assistant(request: MessageRequest):
             user_intent=result.get("intent") or result.get("user_intent")
         )
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent processing failed: {str(e)}")
+
+@app.post("/agent-assistant", response_model=AgentResponse)
+async def agent_assistant_compat(request: SingleMessageRequest):
+    """Compatibility endpoint: accepts a simple {"message": "..."} payload."""
+    try:
+        if not request.message:
+            raise HTTPException(status_code=400, detail="Message is required")
+
+        result = process_user_message(request.message)
+
+        chat_message = result.get("final_response", "")
+        return AgentResponse(
+            chat_message=chat_message,
+            intent=result.get("intent"),
+            intent_details=result.get("intent_details"),
+            inner_messages=[result.get("full_state", {})],
+            user_intent=result.get("intent") or result.get("user_intent")
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent processing failed: {str(e)}")
 

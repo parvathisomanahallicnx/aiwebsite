@@ -1,0 +1,31 @@
+[build]
+  command = "pip install -r requirements.txt"
+  functions = "netlify/functions"
+  publish = "."
+
+[build.environment]
+  PYTHON_VERSION = "3.9"
+
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/index"
+  status = 200
+
+[[redirects]]
+  from = "/agent-assistant/*"
+  to = "/.netlify/functions/index"
+  status = 200
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/index"
+  status = 200
+
+[functions]
+  external_node_modules = ["sharp"]
+  
+[functions."index"]
+  runtime = "python3.9"
+
+[functions."hello"]
+  runtime = "python3.9"
