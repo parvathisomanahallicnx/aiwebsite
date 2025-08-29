@@ -10,13 +10,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from pinecone import Pinecone
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict, Optional, Any
+from dotenv import load_dotenv
 
 # === ENV CONFIG ===
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBA1GSp3jXVMsLDSUapgJ9bFTq0p8ZOZYM")
 PRODUCT_SEARCH_MCP_URL = "https://n5ycpj-wu.myshopify.com/api/mcp"
 ORDER_MCP_URL = "https://cnx-demo-mcp-server.onrender.com/api/mcp"
 
@@ -51,12 +49,14 @@ def call_mcp_server(url: str, tool_name: str, arguments: dict) -> dict:
 def call_gemini_llm(prompt: str) -> str:
     """Call Gemini LLM directly using google.generativeai"""
     try:
+        if not GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY not set")
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(prompt)
         
-        text = response.text if hasattr(response, 'text') else None
-        
+        # Extract text from response
+        text = getattr(response, "text", None)
         if not text and response and getattr(response, "candidates", None):
             try:
                 parts = []
@@ -150,6 +150,7 @@ def analyze_user_intent(state: AgentState):
         return {"intent": "product_search", "intent_details": {}}
 
 # === PRODUCT SEARCH NODE ===
+# Context sent to MCP to guide server-side filtering
 SEARCH_CONTEXT_TEMPLATE = (
     "Search Query: {message}\n"
     "Filtering Guidelines:\n"
@@ -307,9 +308,8 @@ def product_search_node(state: AgentState):
         
         formatted_result = call_gemini_llm(filter_prompt)
         
-        # Parse the AI-filtered result
+        # Extract JSON from LLM response
         try:
-            # Clean up the response to extract JSON
             cleaned = re.sub(r"```[a-zA-Z]*", "", formatted_result).strip("` \n")
             json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
             
@@ -320,9 +320,9 @@ def product_search_node(state: AgentState):
                     "final_response": json.dumps(formatted_products, indent=2)
                 }
         except Exception as e:
-            print(f"[DEBUG] AI filtering failed: {e}")
+            print(f"LLM filtering failed: {e}")
         
-        # Fallback: return raw products if AI filtering fails
+        # Fallback: return raw products with minimal structure
         fallback_response = {"products": raw_products}
         return {
             "products": fallback_response,
@@ -330,7 +330,7 @@ def product_search_node(state: AgentState):
         }
         
     except Exception as e:
-        error_response = {"error": f"Product search error: {str(e)}"}
+        error_response = {"error": f"Product search failed: {str(e)}"}
         return {
             "products": error_response,
             "final_response": json.dumps(error_response, indent=2)
@@ -340,47 +340,58 @@ def product_search_node(state: AgentState):
 def order_creation_node(state: AgentState):
     """Handle order creation requests"""
     try:
-        # Extract product details from user message
+        # Extract order details from user message using LLM
         prompt = f"""
-        Extract product information from the user message for order creation. Return ONLY a JSON object:
+        Extract order information from the user message and return a JSON object:
         {{
-            "product_id": "extracted product ID if mentioned",
-            "product_name": "product name or description",
-            "quantity": number,
-            "found_product": true/false
+            "variant_id": "extracted variant ID if mentioned",
+            "email": "extracted email if mentioned", 
+            "quantity": 1,
+            "needs_more_info": true/false
         }}
 
         User Message: "{state["user_message"]}"
 
-        Look for product IDs, names, quantities. Return ONLY the JSON object.
+        If variant_id or email is missing, set needs_more_info to true.
+        Return ONLY the JSON object.
         """
         
         result = call_gemini_llm(prompt)
         
+        # Parse extraction result
         try:
             cleaned = re.sub(r"```[a-zA-Z]*", "", result).strip("` \n")
             json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
             
             if json_match:
-                product_info = json.loads(json_match.group())
+                order_info = json.loads(json_match.group())
                 
-                if not product_info.get("found_product", False):
-                    error_response = {"error": "Please specify a product to order."}
+                if order_info.get("needs_more_info", True):
+                    error_response = {"error": "Missing information. Please provide variant ID and email address to create an order."}
                     return {
                         "order_result": error_response,
                         "final_response": json.dumps(error_response, indent=2)
                     }
                 
-                # Create order using MCP server
-                order_data = {
-                    "product_id": product_info.get("product_id", "1"),
-                    "quantity": product_info.get("quantity", 1),
-                    "product_name": product_info.get("product_name", "Product")
+                # Create order payload for MCP call
+                order_payload = {
+                    "order": {
+                        "line_items": [{
+                            "variant_id": int(order_info["variant_id"]),
+                            "quantity": order_info.get("quantity", 1)
+                        }],
+                        "customer": {
+                            "email": order_info["email"]
+                        },
+                        "financial_status": "paid",
+                        "test": True
+                    }
                 }
                 
-                raw_order_result = call_mcp_server(ORDER_MCP_URL, "create_order", order_data)
+                # Call MCP server directly for order creation
+                raw_order_result = call_mcp_server(ORDER_MCP_URL, "create_order", order_payload)
                 
-                # Format response
+                # Format response using LLM
                 format_prompt = f"""
                 Format the order creation result into the exact JSON structure below:
 
@@ -403,6 +414,7 @@ def order_creation_node(state: AgentState):
                 
                 formatted_result = call_gemini_llm(format_prompt)
                 
+                # Extract JSON from LLM response
                 try:
                     cleaned = re.sub(r"```[a-zA-Z]*", "", formatted_result).strip("` \n")
                     json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
@@ -416,6 +428,7 @@ def order_creation_node(state: AgentState):
                 except Exception as e:
                     print(f"Order formatting error: {e}")
                 
+                # Fallback to raw data if formatting fails
                 return {
                     "order_result": raw_order_result,
                     "final_response": json.dumps(raw_order_result, indent=2)
@@ -439,6 +452,7 @@ def order_creation_node(state: AgentState):
 def order_status_node(state: AgentState):
     """Handle order status requests"""
     try:
+        # Extract order ID from user message
         prompt = f"""
         Extract the order ID from the user message. Return ONLY a JSON object:
         {{
@@ -467,6 +481,7 @@ def order_status_node(state: AgentState):
                         "final_response": json.dumps(error_response, indent=2)
                     }
                 
+                # Get order status using direct MCP call
                 try:
                     order_id = int(order_info["order_id"])
                     raw_status_result = call_mcp_server(ORDER_MCP_URL, "get_order_status", {"order_id": order_id})
@@ -477,6 +492,46 @@ def order_status_node(state: AgentState):
                         "final_response": json.dumps(error_response, indent=2)
                     }
                 
+                # Format response using LLM
+                format_prompt = f"""
+                Format the order status result into the exact JSON structure below:
+
+                Required JSON format:
+                {{
+                  "order_id": order_id_number,
+                  "order_number": "#ORDER_NUMBER",
+                  "product": "PRODUCT_NAME",
+                  "quantity": quantity_number,
+                  "total_paid": "AMOUNT INR",
+                  "status": "STATUS",
+                  "fulfillment_status": "FULFILLMENT_STATUS",
+                  "order_date": "YYYY-MM-DD HH:MM:SS"
+                }}
+
+                Raw order status result: {json.dumps(raw_status_result, indent=2)}
+
+                Extract the order ID, order number, product name, quantity, total amount, status, fulfillment status, and order date from the raw data.
+                For fulfillment_status, use "Not yet shipped" if null or empty, otherwise use the actual status.
+                Return ONLY the formatted JSON, no other text.
+                """
+                
+                formatted_result = call_gemini_llm(format_prompt)
+                
+                # Extract JSON from LLM response
+                try:
+                    cleaned = re.sub(r"```[a-zA-Z]*", "", formatted_result).strip("` \n")
+                    json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+                    
+                    if json_match:
+                        formatted_status = json.loads(json_match.group())
+                        return {
+                            "order_status": formatted_status,
+                            "final_response": json.dumps(formatted_status, indent=2)
+                        }
+                except Exception as e:
+                    print(f"Order status formatting error: {e}")
+                
+                # Fallback to raw data if formatting fails
                 return {
                     "order_status": raw_status_result,
                     "final_response": json.dumps(raw_status_result, indent=2)
@@ -496,99 +551,299 @@ def order_status_node(state: AgentState):
             "final_response": json.dumps(error_response, indent=2)
         }
 
-# === INFO SEARCH NODE ===
+# === INFO SEARCH (RAG) NODE ===
 def info_search_node(state: AgentState):
-    """Handle informational queries using Gemini LLM"""
+    """Handle informational queries using RAG over existing knowledge base (Pinecone)."""
+    user_q = state.get("user_message", "")
+    topic = "general"
+    
+    print(f"[DEBUG] RAG query: {user_q}")
+
+    # Try RAG with Pinecone + Gemini
     try:
-        # Use Gemini to provide business information
-        prompt = f"""
-        You are a customer service assistant for an e-commerce store. Answer the following customer query with helpful, accurate information:
+        # Get API keys with proper fallback
+        google_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        pinecone_key = os.getenv("PINECONE_API_KEY")
+        pinecone_index = os.getenv("PINECONE_INDEX")
+        
+        print(f"[DEBUG] API Keys - Google: {'✓' if google_key else '✗'}, Pinecone: {'✓' if pinecone_key else '✗'}, Index: {pinecone_index}")
 
-        Customer Query: "{state["user_message"]}"
+        if not google_key:
+            raise ValueError("Google API key not found (GOOGLE_API_KEY or GEMINI_API_KEY)")
+        if not pinecone_key:
+            raise ValueError("Pinecone API key not found (PINECONE_API_KEY)")
+        if not pinecone_index:
+            raise ValueError("Pinecone index not found (PINECONE_INDEX)")
 
-        Provide information about:
-        - Return and exchange policies
-        - Contact information (phone, email, address)
-        - Current offers, discounts, or promotions
-        - Shipping and delivery information
-        - General business information
+        # Configure providers
+        genai.configure(api_key=google_key)
+        _pc = Pinecone(api_key=pinecone_key)
+        print("[DEBUG] Pinecone client initialized")
 
-        If you don't have specific information, provide general helpful guidance and suggest contacting customer support.
+        # Initialize embeddings and vector store
+        embeddings = HuggingFaceEmbeddings(
+            model_name="intfloat/e5-large",
+            encode_kwargs={"normalize_embeddings": True}
+        )
+        print("[DEBUG] Embeddings initialized")
         
-        Format your response as a helpful, professional customer service response.
-        """
+        vectordb = PineconeVectorStore.from_existing_index(
+            index_name=pinecone_index,
+            embedding=embeddings
+        )
+        print("[DEBUG] Vector store connected")
         
-        response = call_gemini_llm(prompt)
-        
-        info_result = {
-            "info_response": response,
-            "query": state["user_message"]
-        }
-        
-        return {
-            "info_result": info_result,
-            "final_response": json.dumps(info_result, indent=2)
-        }
-        
-    except Exception as e:
-        error_response = {"error": f"Info search failed: {str(e)}"}
-        return {
-            "info_result": error_response,
-            "final_response": json.dumps(error_response, indent=2)
-        }
+        # Test if index has data
+        test_results = vectordb.similarity_search("test", k=1)
+        if not test_results:
+            raise ValueError("Pinecone index appears to be empty")
+        print(f"[DEBUG] Index has {len(test_results)} test results")
 
-# === WORKFLOW SETUP ===
-def process_user_message(user_message: str) -> dict:
-    """Process user message through the complete LangGraph workflow"""
-    try:
-        # Initialize state
-        state = AgentState(user_message=user_message)
+        # Setup retrieval chain
+        retriever = vectordb.as_retriever(search_type="similarity", k=8)
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=google_key),
+            retriever=retriever
+        )
+        print("[DEBUG] QA chain initialized")
+
+        # Execute query
+        prompt_q = (
+            "Answer strictly based on the retrieved documents. If nothing relevant is retrieved, say so. Then follow ALL formatting rules below.\n\n"
+            "OUTPUT GUIDELINES:\n"
+            "1) Always rephrase and organize retrieved content into a polished, conversational response.\n"
+            "2) Use clear sections, bullet points, and bolded highlights where applicable.\n"
+            "3) Tone must reflect CNXStore brand – warm, helpful, and modern.\n\n"
+            "WHEN ANSWERING QUESTIONS LIKE:\n"
+            "- 'Tell me about CNXStore'\n"
+            "- 'What membership benefits do you offer?'\n"
+            "- 'What makes CNXStore different?'\n"
+            "- 'What are the store policies?'\n\n"
+            "STRUCTURE THE RESPONSE LIKE THIS:\n"
+            "- Start with a friendly welcome or heading (e.g., ### About cnxStore).\n"
+            "- Include key subheadings such as:\n"
+            "  - **Who We Are**\n"
+            "  - **Product Range**\n"
+            "  - **Why Choose Us**\n"
+            "  - **Member Benefits**\n"
+            "  - **Sustainability & Community**\n"
+            "  - **How to Stay Updated**\n"
+            "- Use bold text, sparse emojis, and clean markdown formatting for readability.\n"
+            "- Make it scannable – avoid one long paragraph.\n\n"
+            "ALWAYS INCLUDE:\n"
+            "- Factual accuracy based on retrieved content.\n"
+            "- A closing line inviting the user to explore or ask more.\n"
+            "- Friendly, professional tone.\n\n"
+            "NEVER INCLUDE:\n"
+            "- Raw retrieval output.\n"
+            "- Technical details (like source paths or IDs).\n"
+            "- Overly robotic or generic phrases.\n\n"
+            f"User question: {user_q}"
+        )
         
-        # Step 1: Analyze intent
-        intent_result = analyze_user_intent(state)
-        state.update(intent_result)
-        
-        # Step 2: Route to appropriate node based on intent
-        if state["intent"] == "product_search":
-            result = product_search_node(state)
-        elif state["intent"] == "order_creation":
-            result = order_creation_node(state)
-        elif state["intent"] == "order_status":
-            result = order_status_node(state)
-        elif state["intent"] == "info_search":
-            result = info_search_node(state)
+        # Important: use the raw user question for retrieval relevance
+        result = qa_chain({"query": user_q})
+        raw_answer = result.get("result", "")
+
+        # Second pass: format to CNXStore brand style (no sources shown)
+        formatting_instructions = (
+            "Rephrase and organize the content into a polished, conversational CNXStore-branded response.\n"
+            "- Use headings, bullet points, and bold highlights.\n"
+            "- Keep it warm, helpful, and modern.\n"
+            "- Do not include citations, technical details, or raw snippets.\n"
+        )
+
+        # Offers-aware formatting
+        offer_keywords = ["offer", "offers", "discount", "sale", "flash", "deal", "coupon", "membership", "loyalty"]
+        is_offer_query = any(k in user_q.lower() for k in offer_keywords)
+
+        if is_offer_query:
+            format_prompt = f"""
+            You are a CNX Store copywriter. Based strictly on the following content, produce a marketing-quality answer.
+
+            {formatting_instructions}
+
+            FORMAT THE ANSWER LIKE THIS:
+            - Title: "Current Offers at CNX Store 🌟"
+            - A warm one-line welcome.
+            - Numbered sections for each distinct offer found (name + 1–2 bullets with percentages, codes, timing, or categories when available). Do not invent details.
+            - Optional section: "Exclusive Member Benefits" if such info appears in the content.
+            - Close with a friendly invitation to ask more.
+
+            CONTENT TO USE:
+            {raw_answer}
+            """
         else:
-            # Default to product search
-            result = product_search_node(state)
-        
-        # Update state with result
-        state.update(result)
-        
-        return {
-            "intent": state["intent"],
-            "intent_details": state.get("intent_details", {}),
-            "final_response": state.get("final_response", ""),
-            "full_state": dict(state)
-        }
-        
-    except Exception as e:
-        error_response = {
-            "intent": "error",
-            "intent_details": {"error": str(e)},
-            "final_response": json.dumps({"error": f"Workflow processing failed: {str(e)}"}, indent=2),
-            "full_state": {"error": str(e)}
-        }
-        return error_response
+            format_prompt = f"""
+            You are a CNX Store copywriter. Based strictly on the following content, produce a structured, skimmable answer.
 
-# === FASTAPI SETUP ===
+            {formatting_instructions}
+
+            Preferred structure when applicable:
+            - Start with a friendly heading (e.g., ### About CNX Store)
+            - Include subheadings such as **Who We Are**, **Product Range**, **Why Choose Us**, **Member Benefits**, **Sustainability & Community**, **How to Stay Updated**.
+            - Close with a helpful invitation to explore or ask more.
+
+            CONTENT TO USE:
+            {raw_answer}
+            """
+
+        formatted = call_gemini_llm(format_prompt) or raw_answer
+        answer = formatted.strip()
+        
+        # Extract sources
+        sources = []
+        for doc in result.get("source_documents", []) or []:
+            if hasattr(doc, 'metadata') and doc.metadata:
+                src = doc.metadata.get("source")
+                if src:
+                    sources.append(src)
+        
+        print(f"[DEBUG] RAG successful - Answer length: {len(answer)}, Sources: {len(sources)}")
+
+        payload = {
+            "info": {
+                "topic": topic,
+                "answer": answer.strip()
+            },
+            "sources": list(dict.fromkeys(sources)) if sources else []
+        }
+        return {
+            "info_result": payload,
+            "final_response": json.dumps(payload, indent=2)
+        }
+
+    except Exception as e:
+        print(f"[DEBUG] RAG failed: {str(e)}")
+        
+        # Enhanced fallback with better topic detection
+        message_lower = user_q.lower()
+        
+        if any(word in message_lower for word in ["return", "refund", "exchange", "policy"]):
+            topic = "return_policy"
+            answer = "Our standard return/exchange window is 7–14 days for unused items with original tags and receipt. Certain items may be non-returnable. For exact policy details, please refer to our Return Policy page or contact support."
+        elif any(word in message_lower for word in ["contact", "phone", "email", "support", "address", "reach"]):
+            topic = "contact_details"
+            answer = "You can reach support via email at support@example.com or phone at +1-000-000-0000. Business hours: Mon–Fri, 9am–6pm IST."
+        elif any(word in message_lower for word in ["offer", "discount", "sale", "promotion", "deal", "coupon"]):
+            topic = "current_offers"
+            answer = "Current promotions vary by season. Please check the Offers page or sign up for our newsletter/app notifications for the latest discounts and coupon codes."
+        else:
+            answer = "I can help with return policy, contact details, or current offers. Please specify your question."
+            
+        payload = {
+            "info": {
+                "topic": topic,
+                "answer": answer,
+                "note": f"RAG not available; showing fallback information. Error: {str(e)}"
+            }
+        }
+        return {
+            "info_result": payload,
+            "final_response": json.dumps(payload, indent=2)
+        }
+
+# === ROUTING FUNCTION ===
+def route_by_intent(state: AgentState):
+    """Route to appropriate node based on user intent"""
+    intent = state.get("intent", "product_search")
+    
+    if intent == "order_creation":
+        return "order_creation"
+    elif intent == "order_status":
+        return "order_status"
+    elif intent == "info_search":
+        return "info_search"
+    else:
+        return "product_search"
+
+# === GRAPH CONSTRUCTION ===
+def create_agent_workflow():
+    """Create and return the LangGraph workflow"""
+    workflow = StateGraph(AgentState)
+    
+    # Add nodes
+    workflow.add_node("analyze_intent", analyze_user_intent)
+    workflow.add_node("product_search", product_search_node)
+    workflow.add_node("order_creation", order_creation_node)
+    workflow.add_node("order_status", order_status_node)
+    workflow.add_node("info_search", info_search_node)
+    
+    # Set entry point
+    workflow.set_entry_point("analyze_intent")
+    
+    # Add conditional routing from intent analysis
+    workflow.add_conditional_edges(
+        "analyze_intent",
+        route_by_intent,
+        {
+            "product_search": "product_search",
+            "order_creation": "order_creation", 
+            "order_status": "order_status",
+            "info_search": "info_search"
+        }
+    )
+    
+    # All nodes end the workflow
+    workflow.add_edge("product_search", END)
+    workflow.add_edge("order_creation", END)
+    workflow.add_edge("order_status", END)
+    workflow.add_edge("info_search", END)
+    
+    return workflow.compile()
+
+# === MAIN EXECUTION FUNCTION ===
+def process_user_message(user_message: str) -> dict:
+    """Process a user message through the LangGraph workflow"""
+    graph = create_agent_workflow()
+    
+    # Execute the workflow
+    result = graph.invoke({"user_message": user_message})
+    
+    # Augment final_response JSON with user_intent when possible
+    intent = result.get("intent")
+    final_response = result.get("final_response") or ""
+    augmented_final = final_response
+    try:
+        parsed = json.loads(final_response) if isinstance(final_response, str) else final_response
+        if isinstance(parsed, dict):
+            # Do not overwrite if already present
+            parsed.setdefault("user_intent", intent)
+            augmented_final = json.dumps(parsed)
+    except Exception:
+        # Leave as-is if not valid JSON
+        pass
+    
+    return {
+        "user_message": result.get("user_message"),
+        "intent": intent,
+        "intent_details": result.get("intent_details"),
+        "final_response": augmented_final,
+        "full_state": result,
+        "user_intent": intent,
+    }
+
+# === FASTAPI INTEGRATION ===
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+import uvicorn
+
 app = FastAPI(title="LangGraph Agent API", version="1.0.0")
 
+# CORS configuration to allow frontend apps (adjust origins as needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
 class MessageRequest(BaseModel):
@@ -601,12 +856,9 @@ class AgentResponse(BaseModel):
     inner_messages: Optional[List[Dict[str, Any]]] = None
     user_intent: Optional[str] = None
 
-class SingleMessageRequest(BaseModel):
-    message: str
-
 @app.post("/agent-assistant/", response_model=AgentResponse)
 async def agent_assistant(request: MessageRequest):
-    """Process user messages through the complete LangGraph workflow"""
+    """Process user messages through the LangGraph workflow"""
     try:
         if not request.messages:
             raise HTTPException(status_code=400, detail="No messages provided")
@@ -621,7 +873,7 @@ async def agent_assistant(request: MessageRequest):
         if not last_message:
             raise HTTPException(status_code=400, detail="No user message found")
         
-        # Process through complete LangGraph workflow
+        # Process through LangGraph workflow
         result = process_user_message(last_message)
         
         # Get the formatted response from the workflow
@@ -632,29 +884,9 @@ async def agent_assistant(request: MessageRequest):
             intent=result.get("intent"),
             intent_details=result.get("intent_details"),
             inner_messages=[result.get("full_state", {})],
-            user_intent=result.get("intent") or result.get("user_intent")
+            user_intent=result.get("user_intent") or result.get("intent")
         )
         
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent processing failed: {str(e)}")
-
-@app.post("/agent-assistant", response_model=AgentResponse)
-async def agent_assistant_compat(request: SingleMessageRequest):
-    """Compatibility endpoint: accepts a simple {"message": "..."} payload."""
-    try:
-        if not request.message:
-            raise HTTPException(status_code=400, detail="Message is required")
-
-        result = process_user_message(request.message)
-
-        chat_message = result.get("final_response", "")
-        return AgentResponse(
-            chat_message=chat_message,
-            intent=result.get("intent"),
-            intent_details=result.get("intent_details"),
-            inner_messages=[result.get("full_state", {})],
-            user_intent=result.get("intent") or result.get("user_intent")
-        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent processing failed: {str(e)}")
 
@@ -663,7 +895,30 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "LangGraph Agent API"}
 
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {"message": "LangGraph Agent API is running on Vercel"}
+# === EXAMPLE USAGE ===
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "--api":
+        # Run as API server
+        uvicorn.run(app, host="0.0.0.0", port=8002)
+    else:
+        # Run test examples
+        test_messages = [
+            "Show me floral shirts under 2000",
+            "What is your return policy?",
+            "How can I contact support?",
+            "Any current offers or discounts?",
+        ]
+        # Example messages for testing
+        # "I want to buy product with variant ID 42910880890963, my email is test@example.com",
+        # "What's the status of order 5904242344019?"
+        
+        for message in test_messages:
+            print(f"\n{'='*50}")
+            print(f"User Message: {message}")
+            print(f"{'='*50}")
+            
+            result = process_user_message(message)
+            print(f"Intent: {result['intent']}")
+            print(f"Response: {result['final_response']}")
