@@ -12,3 +12,4 @@ langchain-huggingface
 pinecone-client
 python-dotenv
 typing-extensions
+sentence-transformers

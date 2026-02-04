@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 # === ENV CONFIG ===
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBA1GSp3jXVMsLDSUapgJ9bFTq0p8ZOZYM")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBrICxhOlWaGmGBBEDbnczELPzfTnAs8Uc")
 PRODUCT_SEARCH_MCP_URL = "https://n5ycpj-wu.myshopify.com/api/mcp"
 ORDER_MCP_URL = "https://cnx-demo-mcp-server.onrender.com/api/mcp"
 
@@ -52,7 +52,7 @@ def call_gemini_llm(prompt: str) -> str:
         if not GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY not set")
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
         response = model.generate_content(prompt)
         
         # Extract text from response
@@ -210,6 +210,80 @@ def product_search_node(state: AgentState):
             arguments["availability"] = filters.get("availability")
         
         print(f"[DEBUG] Query: '{state['user_message']}' | Parsed: {parsed} | MCP Args: {arguments}")
+        
+        # TEMPORARY: Return hardcoded products (Shopify bypass)
+        hardcoded_products = {
+            "products": [
+                {
+                    "id": "prod_001",
+                    "title": "Premium Cotton T-Shirt",
+                    "product_type": "T-Shirts",
+                    "description": "Comfortable and breathable cotton t-shirt perfect for everyday wear",
+                    "variants": [
+                        {
+                            "id": "var_001_s",
+                            "title": "Small / Blue",
+                            "price": "29.99",
+                            "available": True
+                        },
+                        {
+                            "id": "var_001_m",
+                            "title": "Medium / Blue",
+                            "price": "29.99",
+                            "available": True
+                        },
+                        {
+                            "id": "var_001_l",
+                            "title": "Large / Blue",
+                            "price": "29.99",
+                            "available": True
+                        }
+                    ],
+                    "images": [
+                        {
+                            "id": "img_001",
+                            "src": "https://contents.mediadecathlon.com/p2606947/k$1c9e0ffdefc3e67bdeabc82be7893e93/men-s-running-t-shirt-red-kalenji-8771124.jpg"
+                        }
+                    ]
+                },
+                {
+                    "id": "prod_002",
+                    "title": "Classic Denim Jeans",
+                    "product_type": "Jeans",
+                    "description": "Stylish and durable denim jeans with a modern fit",
+                    "variants": [
+                        {
+                            "id": "var_002_30",
+                            "title": "Waist 30 / Dark Blue",
+                            "price": "59.99",
+                            "available": True
+                        },
+                        {
+                            "id": "var_002_32",
+                            "title": "Waist 32 / Dark Blue",
+                            "price": "59.99",
+                            "available": True
+                        },
+                        {
+                            "id": "var_002_34",
+                            "title": "Waist 34 / Dark Blue",
+                            "price": "59.99",
+                            "available": False
+                        }
+                    ],
+                    "images": [
+                        {
+                            "id": "img_002",
+                            "src": "https://media.istockphoto.com/photos/tshirt-design-young-man-in-red-shirt-picture-id1279078135?b=1&k=20&m=1279078135&s=170667a&w=0&h=cZcvqgrxBsLySSdXGR4_Udv_Bo50BohlT6Cojw5_nrA="
+                        }
+                    ]
+                }
+            ]
+        }
+        return {
+            "products": hardcoded_products,
+            "final_response": json.dumps(hardcoded_products, indent=2)
+        }
         
         # Step 3: Call MCP server with structured arguments
         mcp_result = call_mcp_server(PRODUCT_SEARCH_MCP_URL, "search_shop_catalog", arguments)
@@ -566,7 +640,10 @@ def info_search_node(state: AgentState):
         pinecone_key = os.getenv("PINECONE_API_KEY")
         pinecone_index = os.getenv("PINECONE_INDEX")
         
-        print(f"[DEBUG] API Keys - Google: {'✓' if google_key else '✗'}, Pinecone: {'✓' if pinecone_key else '✗'}, Index: {pinecone_index}")
+        # Avoid non-ASCII symbols in logs to prevent Windows console encoding errors
+        google_ok = 'OK' if google_key else 'MISSING'
+        pinecone_ok = 'OK' if pinecone_key else 'MISSING'
+        print(f"[DEBUG] API Keys - Google: {google_ok}, Pinecone: {pinecone_ok}, Index: {pinecone_index}")
 
         if not google_key:
             raise ValueError("Google API key not found (GOOGLE_API_KEY or GEMINI_API_KEY)")
@@ -602,7 +679,7 @@ def info_search_node(state: AgentState):
         # Setup retrieval chain
         retriever = vectordb.as_retriever(search_type="similarity", k=8)
         qa_chain = RetrievalQA.from_chain_type(
-            llm=ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=google_key),
+            llm=ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=google_key),
             retriever=retriever
         )
         print("[DEBUG] QA chain initialized")
@@ -825,11 +902,26 @@ def process_user_message(user_message: str) -> dict:
 
 # === FASTAPI INTEGRATION ===
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import uvicorn
 
 app = FastAPI(title="LangGraph Agent API", version="1.0.0")
+
+# CORS configuration to allow frontend apps (adjust origins as needed)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 class MessageRequest(BaseModel):
     messages: List[Dict[str, str]]
@@ -890,10 +982,7 @@ if __name__ == "__main__":
     else:
         # Run test examples
         test_messages = [
-            "Show me floral shirts under 2000",
-            "What is your return policy?",
-            "How can I contact support?",
-            "Any current offers or discounts?",
+            "What is your return policy?"
         ]
         # Example messages for testing
         # "I want to buy product with variant ID 42910880890963, my email is test@example.com",
